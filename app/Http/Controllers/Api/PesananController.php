@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Pesanan;
+use App\Models\Produk;
 use Exception;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class PesananController extends Controller
@@ -35,8 +37,6 @@ class PesananController extends Controller
     public function store(Request $request)
     {
         try {
-            // PERBAIKAN: Gunakan 'exists:pelanggans,id' jika nama kolom di DB adalah 'id'
-            // Jika kolom di DB memang 'id_pelanggan', biarkan 'exists:pelanggans,id_pelanggan'
             $request->validate([
                 'id_pelanggan'      => 'required|exists:pelanggans,id',
                 'tanggal'           => 'required|date',
@@ -45,19 +45,37 @@ class PesananController extends Controller
                 'items.*.jumlah'    => 'required|integer|min:1',
             ]);
 
-            $pesanan = new Pesanan;
-            $pesanan->id_pelanggan = $request->id_pelanggan;
-            $pesanan->tanggal      = $request->tanggal;
-            $pesanan->save();
-
-            $produk = [];
+            // Cek kecukupan stok seluruh produk sebelum diproses
             foreach ($request->items as $item) {
-                $produk[$item['id_produk']] = [
-                    'jumlah' => $item['jumlah'],
-                ];
+                $produkModel = Produk::find($item['id_produk']);
+                if ($produkModel->stok < $item['jumlah']) {
+                    return response()->json([
+                        'status'  => false,
+                        'message' => "Stok produk '{$produkModel->nama_barang}' tidak mencukupi. Tersisa: {$produkModel->stok}",
+                    ], 422);
+                }
             }
 
-            $pesanan->produk()->attach($produk);
+            $pesanan = DB::transaction(function () use ($request) {
+                $pesanan = new Pesanan;
+                $pesanan->id_pelanggan = $request->id_pelanggan;
+                $pesanan->tanggal      = $request->tanggal;
+                $pesanan->save();
+
+                $produkAttach = [];
+                foreach ($request->items as $item) {
+                    $produkAttach[$item['id_produk']] = [
+                        'jumlah' => $item['jumlah'],
+                    ];
+
+                    // Kurangi stok produk
+                    Produk::where('id', $item['id_produk'])->decrement('stok', $item['jumlah']);
+                }
+
+                $pesanan->produk()->attach($produkAttach);
+
+                return $pesanan;
+            });
 
             return response()->json([
                 'status'  => true,
@@ -107,7 +125,7 @@ class PesananController extends Controller
     public function update(Request $request, $id)
     {
         try {
-            $pesanan = Pesanan::find($id);
+            $pesanan = Pesanan::with('produk')->find($id);
 
             if (! $pesanan) {
                 return response()->json([
@@ -116,7 +134,6 @@ class PesananController extends Controller
                 ], 404);
             }
 
-            // PERBAIKAN: Samakan validasi exists dengan struktur primary key DB
             $request->validate([
                 'id_pelanggan'      => 'required|exists:pelanggans,id',
                 'tanggal'           => 'required|date',
@@ -125,18 +142,37 @@ class PesananController extends Controller
                 'items.*.jumlah'    => 'required|integer|min:1',
             ]);
 
-            $pesanan->id_pelanggan = $request->id_pelanggan;
-            $pesanan->tanggal      = $request->tanggal;
-            $pesanan->save();
+            DB::transaction(function () use ($pesanan, $request) {
+                // 1. Kembalikan stok lama sebelum dihitung ulang
+                foreach ($pesanan->produk as $pLama) {
+                    Produk::where('id', $pLama->id)->increment('stok', $pLama->pivot->jumlah);
+                }
 
-            $produk = [];
-            foreach ($request->items as $item) {
-                $produk[$item['id_produk']] = [
-                    'jumlah' => $item['jumlah'],
-                ];
-            }
+                // 2. Cek apakah stok cukup untuk data baru
+                foreach ($request->items as $item) {
+                    $produkModel = Produk::find($item['id_produk']);
+                    if ($produkModel->stok < $item['jumlah']) {
+                        throw new Exception("Stok produk '{$produkModel->nama_barang}' tidak mencukupi. Tersisa: {$produkModel->stok}");
+                    }
+                }
 
-            $pesanan->produk()->sync($produk);
+                // 3. Update data pesanan
+                $pesanan->id_pelanggan = $request->id_pelanggan;
+                $pesanan->tanggal      = $request->tanggal;
+                $pesanan->save();
+
+                // 4. Potong stok baru & persiapkan sync
+                $produkSync = [];
+                foreach ($request->items as $item) {
+                    $produkSync[$item['id_produk']] = [
+                        'jumlah' => $item['jumlah'],
+                    ];
+
+                    Produk::where('id', $item['id_produk'])->decrement('stok', $item['jumlah']);
+                }
+
+                $pesanan->produk()->sync($produkSync);
+            });
 
             return response()->json([
                 'status'  => true,
@@ -161,7 +197,7 @@ class PesananController extends Controller
     public function destroy($id)
     {
         try {
-            $pesanan = Pesanan::find($id);
+            $pesanan = Pesanan::with('produk')->find($id);
 
             if (! $pesanan) {
                 return response()->json([
@@ -170,15 +206,19 @@ class PesananController extends Controller
                 ], 404);
             }
 
-            // Lepas relasi pivot detail_pesanan terlebih dahulu
-            $pesanan->produk()->detach();
+            DB::transaction(function () use ($pesanan) {
+                // Kembalikan stok produk saat pesanan dihapus
+                foreach ($pesanan->produk as $p) {
+                    Produk::where('id', $p->id)->increment('stok', $p->pivot->jumlah);
+                }
 
-            // Hapus data utama pesanan
-            $pesanan->delete();
+                $pesanan->produk()->detach();
+                $pesanan->delete();
+            });
 
             return response()->json([
                 'status'  => true,
-                'message' => 'Pesanan berhasil dihapus.',
+                'message' => 'Pesanan berhasil dihapus dan stok produk telah dikembalikan.',
             ], 200);
 
         } catch (Exception $e) {

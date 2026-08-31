@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -8,12 +9,19 @@ class Pelanggan extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['nama_pelanggan', 'alamat'];
-		public $timestamps    = true;
+    protected $table = 'pelanggans';
 
-    // Satu pelanggan bisa punya banyak pesanan
+    protected $fillable = [
+        'nama_pelanggan',
+        'alamat',
+    ];
+
+    public $timestamps = true;
+
+    // Relasi: Satu pelanggan memiliki banyak pesanan
     public function pesanan()
     {
-        return $this->hasMany(Pesanan::class, 'id_pelanggan');
+        // Parameter: (Model Tujuan, Foreign Key di tabel pesanans, Local Key di tabel pelanggans)
+        return $this->hasMany(Pesanan::class, 'id_pelanggan', 'id');
     }
 }
