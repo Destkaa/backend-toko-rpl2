@@ -13,7 +13,8 @@ class KategoriController extends Controller
     public function index()
     {
         try {
-            $kategori = Kategori::latest('id_kategori')->get();
+            // PERBAIKAN: Mengurutkan berdasarkan 'id' agar sesuai dengan Model
+            $kategori = Kategori::latest('id')->get();
 
             return response()->json([
                 'status'  => true,
@@ -63,7 +64,7 @@ class KategoriController extends Controller
         try {
             $kategori = Kategori::find($id);
 
-            if (! $kategori) {
+            if (!$kategori) {
                 return response()->json([
                     'status'  => false,
                     'message' => 'Data kategori tidak ditemukan',
@@ -88,15 +89,16 @@ class KategoriController extends Controller
         try {
             $kategori = Kategori::find($id);
 
-            if (! $kategori) {
+            if (!$kategori) {
                 return response()->json([
                     'status'  => false,
                     'message' => 'Data kategori tidak ada',
                 ], 404);
             }
 
+            // PERBAIKAN: Pengecualian unique diatur menggunakan kolom 'id'
             $request->validate([
-                'nama_kategori' => 'required|unique:kategoris,nama_kategori,' . $id . ',id_kategori',
+                'nama_kategori' => 'required|unique:kategoris,nama_kategori,' . $id . ',id',
             ]);
 
             $kategori->nama_kategori = $request->nama_kategori;
@@ -126,7 +128,7 @@ class KategoriController extends Controller
         try {
             $kategori = Kategori::find($id);
 
-            if (! $kategori) {
+            if (!$kategori) {
                 return response()->json([
                     'status'  => false,
                     'message' => 'Data kategori tidak ditemukan',

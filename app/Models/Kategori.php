@@ -11,13 +11,14 @@ class Kategori extends Model
 
     protected $table = 'kategoris';
     
-    // PERBAIKAN: Ubah dari 'id_kategori' menjadi 'id'
+    // Menggunakan primary key standar 'id'
     protected $primaryKey = 'id'; 
 
     protected $fillable = [
         'nama_kategori',
     ];
 
+    // Relasi ke Model Produk
     public function produk()
     {
         return $this->hasMany(Produk::class, 'id_kategori', 'id');

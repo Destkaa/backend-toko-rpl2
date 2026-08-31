@@ -9,14 +9,17 @@ class Pesanan extends Model
 {
     use HasFactory;
 
+    protected $table = 'pesanans';
+    
+    // PERBAIKAN: Beritahu Laravel bahwa Primary Key tabel ini adalah id_pesanan
+    protected $primaryKey = 'id_pesanan';
+
     protected $fillable = ['id_pelanggan', 'tanggal'];
     public $timestamps    = false;
 
     // belongsTo: satu pesanan HANYA punya SATU pelanggan
     public function pelanggan()
     {
-        // Parameter 2: 'id_pelanggan' (kolom di tabel pesanans)
-        // Parameter 3: 'id' (primary key di tabel pelanggans)
         return $this->belongsTo(Pelanggan::class, 'id_pelanggan', 'id');
     }
 
